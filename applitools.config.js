@@ -8,18 +8,24 @@
 
 module.exports = {
   // Required: Applitools API Key
-  // Set this in your environment variables or .env file
-  apiKey: process.env.APPLITOOLS_API_KEY,
+  // Multiple ways to set the API key (in order of priority):
+  // 1. Command line argument: --apiKey=your_key
+  // 2. Environment variable: APPLITOOLS_API_KEY
+  // 3. GitHub Actions secret: secrets.APPLITOOLS_API_KEY
+  // 4. Direct configuration (not recommended for production)
+  apiKey: process.argv.find(arg => arg.startsWith('--apiKey='))?.split('=')[1] ||
+          process.env.APPLITOOLS_API_KEY ||
+          null,
   
   // Optional: Server URL (for private cloud instances)
   serverUrl: process.env.APPLITOOLS_SERVER_URL || 'https://eyesapi.applitools.com',
   
   // Default application name
-  appName: 'Visual Testing Demo App',
+  appName: 'Cursor Visual Testing Demo App',
   
   // Default batch configuration
   batch: {
-    name: process.env.APPLITOOLS_BATCH_NAME || 'Visual Testing Demo Batch',
+    name: process.env.APPLITOOLS_BATCH_NAME || 'Cursor Visual Testing Demo Batch',
     id: process.env.APPLITOOLS_BATCH_ID || null,
   },
   

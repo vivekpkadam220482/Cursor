@@ -11,6 +11,11 @@
     "test:advanced": "jest tests/advanced-visual.test.ts",
     "test:grid": "jest tests/visual-grid.test.ts",
     "test:example": "jest tests/example.test.ts",
+    "test:with-key": "node scripts/run-with-api-key.js",
+    "test:basic-with-key": "node scripts/run-with-api-key.js --apiKey=$npm_config_apikey npm run test:basic",
+    "test:advanced-with-key": "node scripts/run-with-api-key.js --apiKey=$npm_config_apikey npm run test:advanced",
+    "test:grid-with-key": "node scripts/run-with-api-key.js --apiKey=$npm_config_apikey npm run test:grid",
+    "test:all-with-key": "node scripts/run-with-api-key.js --apiKey=$npm_config_apikey npm test",
     "install:playwright": "npx playwright install",
     "setup": "npm install && npm run install:playwright && npm run build"
   },
