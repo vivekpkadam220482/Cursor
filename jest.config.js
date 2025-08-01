@@ -5,7 +5,11 @@ module.exports = {
   testMatch: ['**/*.test.ts'],
   transform: {
     '^.+\\.ts$': 'ts-jest',
+    '^.+\\.js$': 'babel-jest',
   },
+  transformIgnorePatterns: [
+    'node_modules/(?!(pixelmatch|csv-parser)/)'
+  ],
   collectCoverageFrom: [
     'src/**/*.ts',
     '!src/**/*.d.ts',
