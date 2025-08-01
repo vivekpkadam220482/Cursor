@@ -1,43 +1,55 @@
-# Automated Screenshot Comparison Testing
+# Automated Visual Testing with Applitools Eyes
 
-This guide explains how to use the automated screenshot comparison test that was created using Playwright, Applitools, and TypeScript.
+This guide explains how to use the automated visual testing solution that leverages **Applitools Eyes** for AI-powered visual comparison, integrated with Playwright and TypeScript.
 
 ## Overview
 
-The automated test performs comprehensive visual comparison testing by:
+The automated test performs comprehensive visual testing using Applitools Eyes by:
 
-1. ✅ Checking required folder structure
-2. ✅ Validating CSV input files
-3. ✅ Creating output CSV tracking files
-4. ✅ Capturing baseline screenshots from URLs
-5. ✅ Capturing checkpoint screenshots from URLs
-6. ✅ Performing pixel-by-pixel image comparison
-7. ✅ Generating diff images with pink highlighting
-8. ✅ Creating detailed summary reports
+1. ✅ Validating environment and Applitools API key
+2. ✅ Checking CSV input files for URLs to test
+3. ✅ Establishing visual baselines using Applitools Eyes
+4. ✅ Performing AI-powered visual comparisons against baselines
+5. ✅ Generating comprehensive reports with Applitools dashboard links
+6. ✅ Providing detailed statistics and error handling
 
 ## Prerequisites
 
-Make sure you have all dependencies installed:
-
+### 1. Install Dependencies
 ```bash
 npm install
 ```
 
-## Required File Structure
+### 2. Get Applitools API Key
+1. Create a free account at [Applitools](https://applitools.com/)
+2. Get your API key from the account settings
+3. Set the environment variable:
 
-The test will automatically create the following directory structure:
+**Windows:**
+```bash
+set APPLITOOLS_API_KEY=your_api_key_here
+```
+
+**Linux/Mac:**
+```bash
+export APPLITOOLS_API_KEY=your_api_key_here
+```
+
+**Or create a .env file:**
+```
+APPLITOOLS_API_KEY=your_api_key_here
+```
+
+## Directory Structure
+
+The test will automatically create:
 
 ```
-/Baseline/
-  /Screenshots/    # Baseline screenshot storage
-  baseline.csv     # Baseline screenshot log
-/Checkpoint/
-  /Screenshots/    # Checkpoint screenshot storage  
-  checkpoint.csv   # Checkpoint screenshot log
 /Results/
-  /diffs/          # Diff image storage
-  test-summary-report.md  # Final summary report
+  applitools-eyes-report.md  # Comprehensive test report with Applitools links
 ```
+
+**Note:** With Applitools Eyes, screenshots and comparisons are managed in the cloud, so local storage directories are not needed!
 
 ## Input Files
 
@@ -82,46 +94,52 @@ npm run test:debug -- tests/automated-screenshot-comparison.test.ts
 
 The test uses the following default configuration:
 
-- **Timeout**: 25 seconds per webpage
+- **Timeout**: 60 seconds per webpage (increased for reliability)
 - **Resolution**: 1920x1080 
-- **Screenshot Quality**: 100%
-- **Diff Color**: Pink (#FFC0CB)
+- **Visual Testing**: Applitools Eyes AI-powered comparison
 - **Full Page**: True
+- **App Name**: "Automated Screenshot Comparison"
+- **Batch Name**: "Automated Visual Testing Batch"
+- **Test Timeout**: 3 minutes per test step
 
 ## Output Files
 
-### Screenshots
-- **Baseline**: `./Baseline/Screenshots/baseline_<webpagename>.png`
-- **Checkpoint**: `./Checkpoint/Screenshots/checkpoint_<webpagename>.png`
-- **Diff Images**: `./Results/diffs/diff_<webpagename>.png`
-
-### CSV Logs
-- **Baseline Log**: `./Baseline/baseline.csv`
-- **Checkpoint Log**: `./Checkpoint/checkpoint.csv`
-
-Format:
-```csv
-filename,url,timestamp,status
-baseline_Example_Homepage.png,https://example.com,2023-10-20T10:30:00.000Z,success
-```
-
-### Summary Report
-The test generates a comprehensive markdown report at `./Results/test-summary-report.md` containing:
+### Applitools Eyes Report
+The test generates a comprehensive report at `./Results/applitools-eyes-report.md` containing:
 
 - Test execution statistics
-- Screenshot capture results  
-- Image comparison results
-- Error logs
-- File locations
+- Visual comparison results from Applitools Eyes
+- Direct links to Applitools dashboard for each test
+- Detailed match/mismatch/missing statistics
+- Error logs and troubleshooting information
 
-## Image Comparison
+### Applitools Dashboard
+- All visual comparisons are stored in your Applitools account
+- Interactive visual diff tools available online
+- Baseline management through the web interface
+- Team collaboration features
+- Historical test result tracking
 
-The test performs row-by-row comparison:
-- Row 1 of baseline.csv ↔ Row 1 of checkpoint.csv
-- Row 2 of baseline.csv ↔ Row 2 of checkpoint.csv
-- And so on...
+## Visual Comparison Process
 
-Differences are highlighted in **pink** (#FFC0CB) and saved as diff images.
+### Step 1: Baseline Establishment
+- Reads URLs from `source.csv`
+- Uses Applitools Eyes to capture and store baselines in the cloud
+- Each baseline is associated with a specific test name
+
+### Step 2: Visual Comparison
+- Reads URLs from `target.csv`  
+- Captures current state using Applitools Eyes
+- AI-powered comparison against stored baselines
+- Intelligent diff detection (layout, content, styling)
+
+### Applitools Eyes Advantages:
+- **AI-Powered**: Ignores irrelevant differences (anti-aliasing, minor rendering)
+- **Smart Baselines**: Automatic baseline management and versioning
+- **Cross-Browser**: Test across different browsers and devices
+- **Dynamic Content**: Handle dates, ads, and dynamic content intelligently
+- **Collaboration**: Share results with team members
+- **Integration**: Works with CI/CD pipelines
 
 ## Error Handling
 
@@ -138,16 +156,24 @@ All errors are logged to the console and included in the summary report.
 
 ## Test Results Interpretation
 
-### Success Metrics
-- **Screenshots**: Number of successfully captured images
-- **Comparisons**: Number of successful pixel comparisons
-- **Differences**: Total pixel differences found
+### Applitools Eyes Results
+- **Passed**: Visual comparison matches the baseline
+- **Failed**: Visual differences detected that require review
+- **New**: First time running this test (creates baseline)
+- **Missing**: Expected baseline not found
+
+### Result Statistics
+- **Matches**: Number of visual checkpoints that passed
+- **Mismatches**: Number of visual differences detected  
+- **Missing**: Number of missing baselines
+- **Steps**: Total number of visual checkpoints performed
 
 ### Common Issues
-1. **Timeout errors**: Increase timeout in test configuration
-2. **Dimension mismatches**: Ensure consistent viewport settings
-3. **Network errors**: Check URL accessibility
-4. **File permission errors**: Ensure write permissions to output directories
+1. **No API Key**: Set `APPLITOOLS_API_KEY` environment variable
+2. **Timeout errors**: The timeout is now set to 60 seconds per page (increased from 25s for better reliability)
+3. **Network errors**: Check URL accessibility and Applitools connectivity
+4. **New baselines**: First run will create baselines (all tests show as "New")
+5. **Slow sites**: For very slow-loading sites, you may need to increase the timeout further in the config
 
 ## Customization
 
@@ -156,9 +182,8 @@ Edit the `config` object in `tests/automated-screenshot-comparison.test.ts`:
 
 ```typescript
 const config: TestConfig = {
-  timeout: 25000,  // 25 seconds
-  viewport: { width: 1920, height: 1080 },
-  screenshotQuality: 100
+  timeout: 60000,  // 60 seconds (increased for reliability)
+  viewport: { width: 1920, height: 1080 }
 };
 ```
 
@@ -172,12 +197,17 @@ https://newsite.com,New_Site
 https://anothersite.com,Another_Site
 ```
 
-### Custom Diff Colors
-Modify the `pixelmatch` options in the `compareImages` function:
+### Applitools Configuration
+Modify the Eyes configuration in the test file:
 
 ```typescript
-diffColor: [255, 192, 203], // Pink
-diffColorAlt: [255, 0, 0]   // Red alternative
+const configuration = new Configuration();
+configuration.setAppName('Your App Name');
+configuration.setBatch({
+  name: 'Your Batch Name',
+  id: `batch-${Date.now()}`
+});
+configuration.setTestName('Your Test Name');
 ```
 
 ## Integration with CI/CD
@@ -215,7 +245,15 @@ rm -rf dist/ && npm run build
 ## Support
 
 For issues or questions:
-1. Check the summary report for detailed error information
+1. Check the `applitools-eyes-report.md` for detailed results
 2. Review console output for real-time feedback
-3. Verify input CSV file format and URL accessibility
-4. Ensure all dependencies are properly installed
+3. Verify `APPLITOOLS_API_KEY` is properly set
+4. Check your Applitools dashboard at https://applitools.com/
+5. Verify input CSV file format and URL accessibility
+6. Ensure all dependencies are properly installed
+
+## Applitools Resources
+- [Applitools Documentation](https://applitools.com/docs/)
+- [Getting Started Guide](https://applitools.com/docs/getting-started/)
+- [API Key Setup](https://applitools.com/docs/topics/overview/obtain-api-key.html)
+- [Dashboard Guide](https://applitools.com/docs/topics/test-manager/)

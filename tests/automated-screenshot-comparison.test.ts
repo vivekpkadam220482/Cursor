@@ -6,12 +6,10 @@
  */
 
 import { chromium, Browser, Page } from 'playwright';
-import { Eyes, Target, Configuration } from '@applitools/eyes-playwright';
+import { Eyes, Target, Configuration, TestResults } from '@applitools/eyes-playwright';
 import * as fs from 'fs-extra';
 import * as path from 'path';
 import csv from 'csv-parser';
-import { PNG } from 'pngjs';
-import pixelmatch from 'pixelmatch';
 
 interface TestConfig {
   timeout: number;
@@ -24,26 +22,30 @@ interface UrlEntry {
 }
 
 interface ComparisonResult {
-  baselineFile: string;
-  checkpointFile: string;
-  diffFile: string;
-  pixelDifference: number;
-  diffPercentage: number;
+  url: string;
+  testName: string;
+  status: string;
+  appUrl?: string;
+  stepsInfo: number;
+  matches: number;
+  mismatches: number;
+  missing: number;
   success: boolean;
   error?: string;
 }
 
 interface TestSummary {
   totalUrls: number;
-  successfulScreenshots: number;
-  failedScreenshots: number;
   successfulComparisons: number;
   failedComparisons: number;
-  totalDifferences: number;
+  totalMatches: number;
+  totalMismatches: number;
+  totalMissing: number;
   startTime: Date;
   endTime: Date;
   duration: string;
   errors: string[];
+  eyesResults: ComparisonResult[];
 }
 
 describe('Automated Screenshot Comparison Test', () => {
@@ -52,24 +54,17 @@ describe('Automated Screenshot Comparison Test', () => {
   let eyes: Eyes;
 
   const config: TestConfig = {
-    timeout: 25000,
+    timeout: 60000, // Increased to 60 seconds
     viewport: { width: 1920, height: 1080 }
   };
 
   const directories = {
-    baseline: './Baseline',
-    checkpoint: './Checkpoint',
-    results: './Results',
-    baselineScreenshots: './Baseline/Screenshots',
-    checkpointScreenshots: './Checkpoint/Screenshots',
-    resultsDiffs: './Results/diffs'
+    results: './Results'
   };
 
   const csvFiles = {
     source: './source.csv',
-    target: './target.csv',
-    baselineCsv: './Baseline/baseline.csv',
-    checkpointCsv: './Checkpoint/checkpoint.csv'
+    target: './target.csv'
   };
 
   let testSummary: TestSummary;
@@ -79,15 +74,16 @@ describe('Automated Screenshot Comparison Test', () => {
     
     testSummary = {
       totalUrls: 0,
-      successfulScreenshots: 0,
-      failedScreenshots: 0,
       successfulComparisons: 0,
       failedComparisons: 0,
-      totalDifferences: 0,
+      totalMatches: 0,
+      totalMismatches: 0,
+      totalMissing: 0,
       startTime: new Date(),
       endTime: new Date(),
       duration: '',
-      errors: []
+      errors: [],
+      eyesResults: []
     };
 
     // Initialize browser
@@ -99,23 +95,35 @@ describe('Automated Screenshot Comparison Test', () => {
     // Initialize Eyes for Applitools integration
     eyes = new Eyes();
     const configuration = new Configuration();
-    configuration.setAppName('Screenshot Comparison App');
-    configuration.setTestName('Automated Comparison Test');
+    configuration.setAppName('Automated Screenshot Comparison');
+    configuration.setBatch({
+      name: 'Automated Visual Testing Batch',
+      id: `batch-${Date.now()}`
+    });
+    // Configure for visual comparison
+    configuration.setTestName('Visual Comparison Test');
     eyes.setConfiguration(configuration);
   });
 
   beforeEach(async () => {
-    page = await browser.newPage();
-    await page.setViewportSize(config.viewport);
-  });
-
-  afterEach(async () => {
-    if (page) {
-      await page.close();
+    // Only create page if it doesn't exist or was closed
+    if (!page || page.isClosed()) {
+      page = await browser.newPage();
+      await page.setViewportSize(config.viewport);
     }
   });
 
+  afterEach(async () => {
+    // Keep the page open for Eyes tests, only close at the very end
+    // Individual test steps will handle page navigation
+  });
+
   afterAll(async () => {
+    // Close page if still open
+    if (page && !page.isClosed()) {
+      await page.close();
+    }
+    
     if (browser) {
       await browser.close();
     }
@@ -127,24 +135,26 @@ describe('Automated Screenshot Comparison Test', () => {
     console.log('✅ Test Suite Completed');
   });
 
-  test('Step 1: Check for required folder structure', async () => {
-    console.log('📁 Checking folder structure...');
+  test('Step 1: Validate environment and setup', async () => {
+    console.log('🔧 Validating environment...');
     
-    const requiredDirectories = [
-      directories.baselineScreenshots,
-      directories.checkpointScreenshots,
-      directories.resultsDiffs
-    ];
+    // Check for Applitools API key
+    if (!process.env.APPLITOOLS_API_KEY) {
+      const warningMsg = 'APPLITOOLS_API_KEY not set. Visual comparisons will be skipped.';
+      console.warn(`⚠️  ${warningMsg}`);
+      testSummary.errors.push(warningMsg);
+    } else {
+      console.log('✅ Applitools API key is configured');
+    }
 
-    for (const dir of requiredDirectories) {
-      try {
-        await fs.ensureDir(dir);
-        console.log(`✅ Directory exists/created: ${dir}`);
-      } catch (error) {
-        const errorMsg = `Failed to create directory: ${dir} - ${error}`;
-        testSummary.errors.push(errorMsg);
-        throw new Error(errorMsg);
-      }
+    // Ensure results directory exists
+    try {
+      await fs.ensureDir(directories.results);
+      console.log(`✅ Results directory created: ${directories.results}`);
+    } catch (error) {
+      const errorMsg = `Failed to create results directory: ${error}`;
+      testSummary.errors.push(errorMsg);
+      throw new Error(errorMsg);
     }
   });
 
@@ -181,93 +191,49 @@ describe('Automated Screenshot Comparison Test', () => {
     }
   });
 
-  test('Step 3: Create empty CSV files for baseline and checkpoint', async () => {
-    console.log('📝 Creating empty CSV files...');
+  test('Step 3: Establish baselines using Applitools Eyes', async () => {
+    console.log('👁️  Establishing baselines with Applitools Eyes...');
     
-    const csvFilesToCreate = [csvFiles.baselineCsv, csvFiles.checkpointCsv];
-    const csvHeader = 'filename,url,timestamp,status\n';
-
-    for (const csvFile of csvFilesToCreate) {
-      try {
-        await fs.writeFile(csvFile, csvHeader);
-        console.log(`✅ Created CSV file: ${csvFile}`);
-      } catch (error) {
-        const errorMsg = `Failed to create CSV file: ${csvFile} - ${error}`;
-        testSummary.errors.push(errorMsg);
-        throw new Error(errorMsg);
-      }
+    if (!process.env.APPLITOOLS_API_KEY) {
+      console.log('⏭️  Skipping baseline establishment - APPLITOOLS_API_KEY not set');
+      return;
     }
-  });
 
-  test('Step 4: Process baseline URLs and capture screenshots', async () => {
-    console.log('📸 Processing baseline URLs...');
-    
     try {
       const urls = await readCsvFile(csvFiles.source);
       testSummary.totalUrls += urls.length;
 
       for (const urlEntry of urls) {
-        await captureScreenshot(
-          urlEntry,
-          directories.baselineScreenshots,
-          'baseline',
-          csvFiles.baselineCsv
-        );
+        await establishBaseline(urlEntry);
       }
     } catch (error) {
-      const errorMsg = `Failed to process baseline URLs: ${error}`;
+      const errorMsg = `Failed to establish baselines: ${error}`;
       testSummary.errors.push(errorMsg);
       throw new Error(errorMsg);
     }
-  });
+  }, 180000); // 3 minute timeout for Eyes baseline establishment
 
-  test('Step 5: Process checkpoint URLs and capture screenshots', async () => {
-    console.log('📸 Processing checkpoint URLs...');
+  test('Step 4: Perform visual comparison using Applitools Eyes', async () => {
+    console.log('👁️  Performing visual comparison with Applitools Eyes...');
     
+    if (!process.env.APPLITOOLS_API_KEY) {
+      console.log('⏭️  Skipping visual comparison - APPLITOOLS_API_KEY not set');
+      return;
+    }
+
     try {
       const urls = await readCsvFile(csvFiles.target);
-      testSummary.totalUrls += urls.length;
-
+      
       for (const urlEntry of urls) {
-        await captureScreenshot(
-          urlEntry,
-          directories.checkpointScreenshots,
-          'checkpoint',
-          csvFiles.checkpointCsv
-        );
+        const result = await performEyesComparison(urlEntry);
+        testSummary.eyesResults.push(result);
       }
     } catch (error) {
-      const errorMsg = `Failed to process checkpoint URLs: ${error}`;
+      const errorMsg = `Failed to perform visual comparison: ${error}`;
       testSummary.errors.push(errorMsg);
       throw new Error(errorMsg);
     }
-  });
-
-  test('Step 6: Compare screenshots and generate diff images', async () => {
-    console.log('🔍 Comparing screenshots...');
-    
-    try {
-      const baselineEntries = await readCsvFile(csvFiles.baselineCsv);
-      const checkpointEntries = await readCsvFile(csvFiles.checkpointCsv);
-
-      const maxLength = Math.max(baselineEntries.length, checkpointEntries.length);
-
-      for (let i = 0; i < maxLength; i++) {
-        if (i < baselineEntries.length && i < checkpointEntries.length) {
-          const baselineEntry = baselineEntries[i];
-          const checkpointEntry = checkpointEntries[i];
-
-          await compareImages(baselineEntry, checkpointEntry, i + 1);
-        } else {
-          console.log(`⚠️  Row ${i + 1}: Missing corresponding image for comparison`);
-        }
-      }
-    } catch (error) {
-      const errorMsg = `Failed to compare images: ${error}`;
-      testSummary.errors.push(errorMsg);
-      throw new Error(errorMsg);
-    }
-  });
+  }, 180000); // 3 minute timeout for Eyes visual comparison
 
   // Helper Functions
 
@@ -280,10 +246,6 @@ describe('Automated Screenshot Comparison Test', () => {
         .on('data', (data: any) => {
           if (data.url && data.name) {
             results.push({ url: data.url, name: data.name });
-          } else if (data.filename && data.url) {
-            // Handle CSV files with filename column (remove prefix and extension)
-            const cleanName = data.filename.replace(/^(baseline_|checkpoint_)/, '').replace(/\.(png|jpg|jpeg)$/i, '');
-            results.push({ url: data.url, name: cleanName });
           }
         })
         .on('end', () => resolve(results))
@@ -291,125 +253,142 @@ describe('Automated Screenshot Comparison Test', () => {
     });
   }
 
-  async function captureScreenshot(
-    urlEntry: UrlEntry,
-    screenshotDir: string,
-    prefix: string,
-    csvFile: string
-  ): Promise<void> {
-    const fileName = `${prefix}_${urlEntry.name.replace(/[^a-zA-Z0-9]/g, '_')}.png`;
-    const filePath = path.join(screenshotDir, fileName);
+  async function establishBaseline(urlEntry: UrlEntry): Promise<void> {
+    let eyesOpened = false;
+    let localPage = page;
     
     try {
-      console.log(`📍 Capturing ${urlEntry.url} as ${fileName}`);
+      console.log(`👁️  Establishing baseline for: ${urlEntry.url} (${urlEntry.name})`);
       
-      // Navigate to URL with timeout
-      await page.goto(urlEntry.url, { 
+      // Ensure we have a fresh page for this operation
+      if (!localPage || localPage.isClosed()) {
+        localPage = await browser.newPage();
+        await localPage.setViewportSize(config.viewport);
+      }
+      
+      // Open Eyes session for baseline
+      await eyes.open(localPage, 'Automated Screenshot Comparison', `Baseline: ${urlEntry.name}`);
+      eyesOpened = true;
+      
+      // Navigate to URL
+      await localPage.goto(urlEntry.url, { 
         waitUntil: 'networkidle',
         timeout: config.timeout 
       });
-
+      
       // Wait for page to be fully loaded
-      await page.waitForTimeout(2000);
-
-      // Take full page screenshot
-      await page.screenshot({
-        path: filePath,
-        fullPage: true
-        // Note: quality option is only supported for JPEG format, not PNG
-      });
-
-      // Log to CSV
-      const csvEntry = `${fileName},${urlEntry.url},${new Date().toISOString()},success\n`;
-      await fs.appendFile(csvFile, csvEntry);
-
-      testSummary.successfulScreenshots++;
-      console.log(`✅ Screenshot saved: ${fileName}`);
-
+      await localPage.waitForTimeout(2000);
+      
+      // Capture full page with Eyes (this creates the baseline)
+      await eyes.check(`${urlEntry.name} - Full Page`, Target.window().fully());
+      
+      // Close Eyes session
+      const results = await eyes.close();
+      eyesOpened = false;
+      
+      console.log(`✅ Baseline established: ${urlEntry.name} - Status: ${results?.getStatus()}`);
+      
     } catch (error) {
-      testSummary.failedScreenshots++;
-      const errorMsg = `Failed to capture screenshot for ${urlEntry.url}: ${error}`;
+      if (eyesOpened) {
+        try {
+          await eyes.abortIfNotClosed();
+        } catch (abortError) {
+          console.error(`Failed to abort Eyes session: ${abortError}`);
+        }
+      }
+      
+      const errorMsg = `Failed to establish baseline for ${urlEntry.url}: ${error}`;
       console.error(`❌ ${errorMsg}`);
-      
-      // Log error to CSV
-      const csvEntry = `${fileName},${urlEntry.url},${new Date().toISOString()},failed\n`;
-      await fs.appendFile(csvFile, csvEntry);
-      
       testSummary.errors.push(errorMsg);
     }
   }
 
-  async function compareImages(
-    baselineEntry: UrlEntry,
-    checkpointEntry: UrlEntry,
-    rowNumber: number
-  ): Promise<ComparisonResult> {
-    const baselineFileName = `baseline_${baselineEntry.name.replace(/[^a-zA-Z0-9]/g, '_')}.png`;
-    const checkpointFileName = `checkpoint_${checkpointEntry.name.replace(/[^a-zA-Z0-9]/g, '_')}.png`;
-    const diffFileName = `diff_${baselineEntry.name.replace(/[^a-zA-Z0-9]/g, '_')}.png`;
-
-    const baselinePath = path.join(directories.baselineScreenshots, baselineFileName);
-    const checkpointPath = path.join(directories.checkpointScreenshots, checkpointFileName);
-    const diffPath = path.join(directories.resultsDiffs, diffFileName);
-
+  async function performEyesComparison(urlEntry: UrlEntry): Promise<ComparisonResult> {
+    let eyesOpened = false;
+    let localPage = page;
+    
     const result: ComparisonResult = {
-      baselineFile: baselineFileName,
-      checkpointFile: checkpointFileName,
-      diffFile: diffFileName,
-      pixelDifference: 0,
-      diffPercentage: 0,
+      url: urlEntry.url,
+      testName: urlEntry.name,
+      status: 'Failed',
+      stepsInfo: 0,
+      matches: 0,
+      mismatches: 0,
+      missing: 0,
       success: false
     };
 
     try {
-      console.log(`🔍 Comparing Row ${rowNumber}: ${baselineFileName} vs ${checkpointFileName}`);
-
-      // Check if both files exist
-      const baselineExists = await fs.pathExists(baselinePath);
-      const checkpointExists = await fs.pathExists(checkpointPath);
-
-      if (!baselineExists || !checkpointExists) {
-        throw new Error(`Missing files - Baseline: ${baselineExists}, Checkpoint: ${checkpointExists}`);
+      console.log(`👁️  Comparing: ${urlEntry.url} (${urlEntry.name})`);
+      
+      // Ensure we have a fresh page for this operation
+      if (!localPage || localPage.isClosed()) {
+        localPage = await browser.newPage();
+        await localPage.setViewportSize(config.viewport);
       }
-
-      // Read image files
-      const img1 = PNG.sync.read(await fs.readFile(baselinePath));
-      const img2 = PNG.sync.read(await fs.readFile(checkpointPath));
-
-      // Ensure images have the same dimensions
-      const { width, height } = img1;
-      if (img2.width !== width || img2.height !== height) {
-        throw new Error(`Image dimensions don't match - Baseline: ${width}x${height}, Checkpoint: ${img2.width}x${img2.height}`);
-      }
-
-      // Create diff image
-      const diff = new PNG({ width, height });
-
-      // Perform pixel comparison with pink highlighting
-      const pixelDiff = pixelmatch(img1.data, img2.data, diff.data, width, height, {
-        threshold: 0.1,
-        diffColor: [255, 192, 203], // Pink color #FFC0CB
-        diffColorAlt: [255, 192, 203]
+      
+      // Open Eyes session for comparison
+      await eyes.open(localPage, 'Automated Screenshot Comparison', `Comparison: ${urlEntry.name}`);
+      eyesOpened = true;
+      
+      // Navigate to URL
+      await localPage.goto(urlEntry.url, { 
+        waitUntil: 'networkidle',
+        timeout: config.timeout 
       });
-
-      // Save diff image
-      await fs.writeFile(diffPath, PNG.sync.write(diff));
-
-      result.pixelDifference = pixelDiff;
-      result.diffPercentage = (pixelDiff / (width * height)) * 100;
-      result.success = true;
-
-      testSummary.successfulComparisons++;
-      testSummary.totalDifferences += pixelDiff;
-
-      console.log(`✅ Comparison completed: ${pixelDiff} pixels different (${result.diffPercentage.toFixed(2)}%)`);
-
+      
+      // Wait for page to be fully loaded
+      await localPage.waitForTimeout(2000);
+      
+      // Capture and compare with Eyes
+      await eyes.check(`${urlEntry.name} - Full Page`, Target.window().fully());
+      
+      // Close Eyes session and get results
+      const eyesResults = await eyes.close();
+      eyesOpened = false;
+      
+      if (eyesResults) {
+        result.status = eyesResults.getStatus();
+        result.appUrl = eyesResults.getUrl();
+        result.stepsInfo = eyesResults.getSteps();
+        result.matches = eyesResults.getMatches();
+        result.mismatches = eyesResults.getMismatches();
+        result.missing = eyesResults.getMissing();
+        result.success = eyesResults.getStatus() === 'Passed';
+        
+        // Update summary
+        if (result.success) {
+          testSummary.successfulComparisons++;
+        } else {
+          testSummary.failedComparisons++;
+        }
+        
+        testSummary.totalMatches += result.matches;
+        testSummary.totalMismatches += result.mismatches;
+        testSummary.totalMissing += result.missing;
+        
+        console.log(`✅ Eyes comparison completed: ${urlEntry.name}`);
+        console.log(`   Status: ${result.status}`);
+        console.log(`   Matches: ${result.matches}, Mismatches: ${result.mismatches}, Missing: ${result.missing}`);
+        console.log(`   Results URL: ${result.appUrl}`);
+      } else {
+        throw new Error('No results returned from Eyes');
+      }
+      
     } catch (error) {
+      if (eyesOpened) {
+        try {
+          await eyes.abortIfNotClosed();
+        } catch (abortError) {
+          console.error(`Failed to abort Eyes session: ${abortError}`);
+        }
+      }
+      
       result.error = error instanceof Error ? error.message : String(error);
       result.success = false;
       testSummary.failedComparisons++;
       
-      const errorMsg = `Failed to compare images for row ${rowNumber}: ${error}`;
+      const errorMsg = `Failed Eyes comparison for ${urlEntry.url}: ${error}`;
       console.error(`❌ ${errorMsg}`);
       testSummary.errors.push(errorMsg);
     }
@@ -420,8 +399,11 @@ describe('Automated Screenshot Comparison Test', () => {
   async function generateSummaryReport(): Promise<void> {
     console.log('\n📊 Generating Summary Report...');
     
+    const totalComparisons = testSummary.successfulComparisons + testSummary.failedComparisons;
+    const successRate = totalComparisons > 0 ? ((testSummary.successfulComparisons / totalComparisons) * 100).toFixed(2) : '0';
+    
     const reportContent = `
-# Automated Screenshot Comparison Test Report
+# Automated Visual Testing Report - Applitools Eyes
 
 ## Test Summary
 - **Start Time**: ${testSummary.startTime.toISOString()}
@@ -429,42 +411,58 @@ describe('Automated Screenshot Comparison Test', () => {
 - **Duration**: ${testSummary.duration}
 - **Total URLs Processed**: ${testSummary.totalUrls}
 
-## Screenshot Results
-- **Successful Screenshots**: ${testSummary.successfulScreenshots}
-- **Failed Screenshots**: ${testSummary.failedScreenshots}
-- **Success Rate**: ${((testSummary.successfulScreenshots / (testSummary.successfulScreenshots + testSummary.failedScreenshots)) * 100).toFixed(2)}%
+## Applitools Eyes Results
+- **Successful Visual Tests**: ${testSummary.successfulComparisons}
+- **Failed Visual Tests**: ${testSummary.failedComparisons}
+- **Success Rate**: ${successRate}%
 
-## Comparison Results
-- **Successful Comparisons**: ${testSummary.successfulComparisons}
-- **Failed Comparisons**: ${testSummary.failedComparisons}
-- **Total Pixel Differences**: ${testSummary.totalDifferences}
-- **Average Differences per Comparison**: ${testSummary.successfulComparisons > 0 ? (testSummary.totalDifferences / testSummary.successfulComparisons).toFixed(2) : 0}
+## Visual Comparison Statistics
+- **Total Matches**: ${testSummary.totalMatches}
+- **Total Mismatches**: ${testSummary.totalMismatches}
+- **Total Missing**: ${testSummary.totalMissing}
+
+## Detailed Results
+${testSummary.eyesResults.map((result, index) => `
+### ${index + 1}. ${result.testName}
+- **URL**: ${result.url}
+- **Status**: ${result.status}
+- **Matches**: ${result.matches}
+- **Mismatches**: ${result.mismatches}
+- **Missing**: ${result.missing}
+- **Steps**: ${result.stepsInfo}
+${result.appUrl ? `- **Applitools Results**: [View Results](${result.appUrl})` : ''}
+${result.error ? `- **Error**: ${result.error}` : ''}
+`).join('\n')}
 
 ## Errors Encountered
 ${testSummary.errors.length > 0 ? testSummary.errors.map((error, index) => `${index + 1}. ${error}`).join('\n') : 'No errors encountered.'}
 
-## Files Generated
-- Baseline Screenshots: \`${directories.baselineScreenshots}\`
-- Checkpoint Screenshots: \`${directories.checkpointScreenshots}\`
-- Diff Images: \`${directories.resultsDiffs}\`
-- Baseline Log: \`${csvFiles.baselineCsv}\`
-- Checkpoint Log: \`${csvFiles.checkpointCsv}\`
+## Technology Stack
+- **Visual Testing**: Applitools Eyes
+- **Browser Automation**: Playwright
+- **Test Framework**: Jest + TypeScript
+
+## How to Review Results
+1. Check the Applitools dashboard at: https://applitools.com/
+2. Click on individual test result URLs provided above
+3. Use the Applitools visual comparison tools to analyze differences
 
 ---
 Report generated on: ${new Date().toISOString()}
 `;
 
     try {
-      const reportPath = './Results/test-summary-report.md';
+      const reportPath = './Results/applitools-eyes-report.md';
       await fs.writeFile(reportPath, reportContent);
       console.log(`✅ Summary report saved: ${reportPath}`);
       
       // Also log to console
       console.log('\n' + '='.repeat(80));
-      console.log('📈 TEST SUMMARY');
+      console.log('👁️  APPLITOOLS EYES TEST SUMMARY');
       console.log('='.repeat(80));
-      console.log(`Screenshots: ${testSummary.successfulScreenshots}/${testSummary.successfulScreenshots + testSummary.failedScreenshots} successful`);
-      console.log(`Comparisons: ${testSummary.successfulComparisons}/${testSummary.successfulComparisons + testSummary.failedComparisons} successful`);
+      console.log(`Visual Tests: ${testSummary.successfulComparisons}/${totalComparisons} successful`);
+      console.log(`Total Matches: ${testSummary.totalMatches}`);
+      console.log(`Total Mismatches: ${testSummary.totalMismatches}`);
       console.log(`Total Duration: ${testSummary.duration}`);
       console.log(`Errors: ${testSummary.errors.length}`);
       console.log('='.repeat(80));
